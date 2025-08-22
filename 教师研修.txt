@@ -1,0 +1,240 @@
+// ==UserScript==
+// @name         2025年智慧中小学寒假教师研修
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @author       fujia9966
+// @description  作者微信：fujia9966
+
+// @match        https://basic.smartedu.cn/*
+// @match        https://www.smartedu.cn/*
+// @match        https://teacher.vocational.smartedu.cn/*
+// @match        https://core.teacher.vocational.smartedu.cn/*
+
+// ==/UserScript==
+
+(function () {
+    'use strict';
+    function skipVideo() {
+        let video = document.querySelector('video');
+        if (video) {
+            video.muted = true;
+            video.play();
+            video.pause();
+            video.currentTime = video.duration;
+            video.play();
+            setTimeout(700);
+            video.currentTime = video.duration - 1;
+            video.play();
+            video.currentTime = video.duration - 1;
+            video.play();
+        }
+    }
+ 
+    // 海豚音播放视频
+    function skipVideo2() {
+        let video = document.querySelector('video');
+        if (video) {
+            video.muted = true;
+            video.play();
+        }
+    }
+ 
+    function rapidSkip(times, interval) {
+        let count = 0;
+        const intervalId = setInterval(() => {
+            if (count >= times) {
+                clearInterval(intervalId);
+                return;
+            }
+            skipVideo();
+            count++;
+        }, interval);
+    }
+ 
+    let clickTimer;
+ 
+    document.addEventListener('DOMContentLoaded', function () {
+        removePopup();
+        removeNewPopup();
+        console.log('移除弹窗');
+    });
+ 
+    document.addEventListener('click', function (event) {
+        if (event.button === 0) {
+            if (clickTimer) {
+                clearInterval(clickTimer);
+            }
+            rapidSkip(4, 50);
+            clickTimer = setInterval(() => {
+                rapidSkip(4, 50);
+            }, 13000);
+        }
+    });
+ 
+    document.addEventListener('keydown', function (event) {
+        const charCode = event.keyCode;
+        if ((charCode >= 65 && charCode <= 90) || (charCode >= 97 && charCode <= 122)) {
+            rapidSkip(4, 50);
+        }
+    });
+
+
+
+    class StreamController {
+        constructor() {
+            this.init();
+            this.createControls();
+            this.setupHooks();
+        }
+
+        init() {
+            // 保存原始方法
+            this.originalCreateObjectURL = URL.createObjectURL;
+            this.originalAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
+            this.activeVideos = new Set();
+            this.frameCount = 0;
+        }
+
+        createControls() {
+            const panel = document.createElement('div');
+            panel.innerHTML = `
+                <div style="
+                    position: fixed;
+                    top: 10px;
+                    right: 10px;
+                    z-index: 2147483647;
+                    background: rgba(33, 33, 33, 0.9);
+                    padding: 8px;
+                    border-radius: 4px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                    font-family: Arial;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                ">
+                    <button id="jumpBtn" style="
+                        padding: 6px 12px;
+                        background: #4CAF50;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                    ">跳过视频</button>
+                    <button id="frameSkipBtn" style="
+                        padding: 6px 12px;
+                        background: #2196F3;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                    ">跳帧加速</button>
+                </div>
+            `;
+
+            document.body.appendChild(panel);
+            this.bindEvents();
+        }
+
+        setupHooks() {
+            // 拦截MSE创建
+            URL.createObjectURL = (...args) => {
+                const url = this.originalCreateObjectURL.apply(URL, args);
+                if (args[0] instanceof MediaSource) {
+                    this.handleMediaSource(args[0]);
+                }
+                return url;
+            };
+
+            // 监控视频元素
+            const observer = new MutationObserver(() => {
+                document.querySelectorAll('video').forEach(video => {
+                    if (!this.activeVideos.has(video)) {
+                        this.handleVideo(video);
+                        this.activeVideos.add(video);
+                    }
+                });
+            });
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        handleMediaSource(mediaSource) {
+            mediaSource.addEventListener('sourceopen', () => {
+                // 拦截添加源缓冲区
+                MediaSource.prototype.addSourceBuffer = function(mimeType) {
+                    const sourceBuffer = this.originalAddSourceBuffer.call(this, mimeType);
+                    const originalAppend = sourceBuffer.appendBuffer;
+
+                    sourceBuffer.appendBuffer = function(data) {
+                        // 修改视频数据
+                        const modifiedData = new Uint8Array(data);
+                        originalAppend.call(this, modifiedData);
+                    };
+
+                    return sourceBuffer;
+                };
+            });
+        }
+
+        handleVideo(video) {
+            // 注入自定义控制
+            const originalRequestFrame = video.requestVideoFrameCallback;
+            video.requestVideoFrameCallback = (callback) => {
+                return originalRequestFrame.call(video, (now, metadata) => {
+                    this.frameCount++;
+                    if (this.skipFrames) {
+                        video.currentTime += 0.1;
+                    }
+                    callback(now, metadata);
+                });
+            };
+        }
+
+        bindEvents() {
+            document.getElementById('jumpBtn').onclick = () => this.jumpVideo();
+            document.getElementById('frameSkipBtn').onclick = () => this.toggleFrameSkip();
+        }
+
+        jumpVideo() {
+            document.querySelectorAll('video').forEach(video => {
+                try {
+                    // 使用RAF循环来突破限制
+                    const jump = () => {
+                        if (video.currentTime < video.duration - 0.1) {
+                            video.currentTime += 1;
+                            requestAnimationFrame(jump);
+                        }
+                    };
+                    requestAnimationFrame(jump);
+
+                    // 触发结束事件
+                    setTimeout(() => {
+                        video.dispatchEvent(new Event('ended'));
+                        video.dispatchEvent(new Event('complete'));
+                    }, 100);
+                } catch(e) {
+                    console.log('跳转失败', e);
+                }
+            });
+        }
+
+        toggleFrameSkip() {
+            this.skipFrames = !this.skipFrames;
+            document.getElementById('frameSkipBtn').style.background =
+                this.skipFrames ? '#f44336' : '#2196F3';
+        }
+    }
+
+    // 延迟初始化
+    window.addEventListener('load', () => {
+        setTimeout(() => new StreamController(), 1000);
+    });
+
+
+
+
+
+})();
